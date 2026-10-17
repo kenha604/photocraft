@@ -427,9 +427,23 @@ mod tests {
         app.ui.tool = Tool::Brush;
         press(&mut app, egui::Modifiers::NONE);
         assert_eq!(app.ui.tool, Tool::Move);
+        // Custom: pressing V again keeps the Move tool instead of cycling.
+        press(&mut app, egui::Modifiers::NONE);
+        assert_eq!(app.ui.tool, Tool::Move);
+        press(&mut app, egui::Modifiers::SHIFT);
+        assert_eq!(app.ui.tool, Tool::Artboard);
+        // ... and V from the Artboard tool goes back to Move.
+        press(&mut app, egui::Modifiers::NONE);
+        assert_eq!(app.ui.tool, Tool::Move);
         press(&mut app, egui::Modifiers::SHIFT);
         assert_eq!(app.ui.tool, Tool::Artboard);
         press(&mut app, egui::Modifiers::SHIFT);
+        assert_eq!(app.ui.tool, Tool::Move);
+        // With Use Shift Key for Tool Switch on, V still lands on Move.
+        app.session.edit_prefs(|p| p.tools.use_shift_key_for_tool_switch = true);
+        press(&mut app, egui::Modifiers::SHIFT);
+        assert_eq!(app.ui.tool, Tool::Artboard);
+        press(&mut app, egui::Modifiers::NONE);
         assert_eq!(app.ui.tool, Tool::Move);
     }
 }

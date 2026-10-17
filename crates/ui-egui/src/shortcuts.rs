@@ -538,11 +538,18 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // Tool keys; pressing the key of the current group cycles within it. With Preferences ›
     // Tools › Use Shift Key for Tool Switch, only ⇧+key cycles and the plain key keeps the
     // group's current tool. From another group, the key picks the group's last-used tool.
+    // Custom: plain V always selects the Move tool (pressing it again keeps Move rather than
+    // cycling to the Artboard tool); ⇧V still cycles Move ↔ Artboard.
     let shift_switch = app.session.prefs().tools.use_shift_key_for_tool_switch;
+    let shift_held = ctx.input(|i| i.modifiers.shift);
     for t in Tool::ALL {
         let Some(k) = Key::from_name(&t.key().to_string()) else { continue };
         let cycle_shift = shift_switch && ctx.input_mut(|i| i.consume_key(Modifiers::SHIFT, k));
         if cycle_shift || pressed(k) {
+            if t.key() == Tool::Move.key() && !shift_held {
+                app.ui.tool = Tool::Move;
+                return;
+            }
             let group: Vec<Tool> = Tool::ALL.iter().copied().filter(|x| x.key() == t.key()).collect();
             app.ui.tool = match group.iter().position(|x| *x == app.ui.tool) {
                 Some(i) if shift_switch && !cycle_shift => group[i],
