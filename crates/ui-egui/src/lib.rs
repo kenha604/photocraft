@@ -170,6 +170,7 @@ pub mod slice_ui;
 pub mod smart_ui;
 pub mod snap_ui;
 pub(crate) mod solid_fill_ui;
+pub mod splash;
 pub mod state;
 pub mod stroke_constraint;
 pub mod stroke_trail;
@@ -533,6 +534,8 @@ pub struct PhotocraftApp {
     pub(crate) notices_hovered: bool,
     /// Apply theme on first frame.
     styled: bool,
+    /// The start-up splash while it shows (the desktop app sets it; `None` starts into the UI).
+    pub splash: Option<splash::Splash>,
     /// Whether the window uses an integrated (transparent) macOS title bar.
     pub integrated_titlebar: bool,
     /// Windows and Linux: the window has no OS decorations and the app's top bar is the title bar
@@ -724,6 +727,7 @@ impl PhotocraftApp {
             frame: 0,
             notices_hovered: false,
             styled: false,
+            splash: None,
             integrated_titlebar: false,
             custom_titlebar: false,
             last_window_title: String::new(),
@@ -1684,6 +1688,9 @@ impl eframe::App for PhotocraftApp {
         notices::show(self, &ctx);
         gpu_status::show_fallback(self, &ctx);
         kys_import::show_offer(self, &ctx);
+        if self.splash.as_mut().is_some_and(|s| !s.show(&ctx)) {
+            self.splash = None;
+        }
         if self.custom_titlebar {
             titlebar::resize_zones(ui);
         }

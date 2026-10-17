@@ -41,7 +41,7 @@ fn open_filter_extensions(extensions: &[&str]) -> Vec<String> {
 fn open_filters() -> Vec<(&'static str, Vec<String>)> {
     vec![
         ("All Formats", open_filter_extensions(OPEN_EXTS)),
-        ("PhotoCraft", open_filter_extensions(&["pcraft"])),
+        ("KenShoppe", open_filter_extensions(&["pcraft"])),
         ("OpenRaster", open_filter_extensions(&["ora"])),
         ("SVG", open_filter_extensions(SVG_EXTS)),
     ]
@@ -52,7 +52,7 @@ fn open_filters() -> Vec<(&'static str, Vec<String>)> {
 /// keeps defaulting to PSD.
 const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("PSD Document", &["psd", "psb"]),
-    ("PhotoCraft", &["pcraft"]),
+    ("KenShoppe", &["pcraft"]),
     ("OpenRaster", &["ora"]),
     ("PNG", &["png"]),
     ("JPEG", &["jpg"]),

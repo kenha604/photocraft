@@ -6,7 +6,9 @@
 //! - **Windows**: winit turns `WM_POINTER` pen and touch input into `WindowEvent::Touch` with a
 //!   normalised force (`POINTER_PEN_INFO::pressure / 1024`); egui-winit forwards it as
 //!   `egui::Event::Touch { force }` alongside the emulated pointer. [`Stylus::update`] reads it.
-//!   winit drops the pen's tilt and rotation, so those stay 0.
+//!   winit drops the pen's tilt, rotation and eraser end, so the desktop app subclasses the
+//!   window (the `photocraft-tablet` crate) and writes each message's `POINTER_PEN_INFO` into
+//!   the [`StylusFeed`].
 //! - **Web**: eframe forwards touch force but not pen pointer events, so the web runner listens
 //!   to `pointerdown`/`pointermove` itself and writes `pressure`, `tiltX`, `tiltY`, `twist` and
 //!   the eraser button of `pointerType == "pen"` events into the [`StylusFeed`].
@@ -185,13 +187,18 @@ impl Stylus {
         }
         self.frame = self.feed.drain();
         self.current = None;
+        // A pen the platform feeds (Windows) also arrives as touch force: the feed's samples
+        // carry the same pressure with its tilt, so the tilt-less touch samples stay out.
+        let fed = !self.frame.is_empty() || self.feed.get().is_some();
         for e in events {
             if let egui::Event::Touch { phase, force, .. } = e {
                 match phase {
                     egui::TouchPhase::Start | egui::TouchPhase::Move => {
                         if let Some(f) = force.filter(|f| f.is_finite()) {
                             self.touch = Some(f.clamp(0.0, 1.0));
-                            self.frame.push(PenSample { pressure: f.clamp(0.0, 1.0), ..Default::default() });
+                            if !fed {
+                                self.frame.push(PenSample { pressure: f.clamp(0.0, 1.0), ..Default::default() });
+                            }
                         }
                     }
                     egui::TouchPhase::End | egui::TouchPhase::Cancel => self.lifted = true,
@@ -533,6 +540,21 @@ mod tests {
         assert_eq!(s.sample(), Some(PenSample { pressure: 0.6, tilt_x: 90.0, tilt_y: -30.0, rotation: 270.0, eraser: false }));
         s.feed.set(None);
         assert_eq!(s.pressure(), 0.3);
+    }
+
+    /// Windows: the pen arrives both in the feed (with tilt) and as touch force (without).
+    #[test]
+    fn a_fed_pens_touch_force_does_not_flatten_its_tilt() {
+        let mut s = Stylus::default();
+        s.feed.set(Some(PenSample { tilt_x: 40.0, ..pen(0.5) }));
+        s.update(&[touch(egui::TouchPhase::Start, Some(0.5))]);
+        s.begin_stroke();
+        s.feed.set(Some(PenSample { tilt_x: 40.0, ..pen(0.6) }));
+        s.update(&[touch(egui::TouchPhase::Move, Some(0.6))]);
+        for k in 0..4 {
+            s.select(k, 4);
+            assert_eq!(s.sample().map(|p| p.tilt_x), Some(40.0), "move {k}");
+        }
     }
 
     #[test]

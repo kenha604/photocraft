@@ -877,3 +877,34 @@ fn hand_tool_offers_scale_buttons_and_requests_the_right_view() {
     assert!(h.state().ui.views[0].fill_pending);
     assert!(!h.state().ui.views[0].fit_pending);
 }
+
+/// The command bound to the Brushes tab (F9 with imported Photoshop shortcuts) hides the panel
+/// when that tab is already up, and the resizable panel settles: it doesn't creep taller or wider
+/// from one frame to the next on either tab.
+#[test]
+fn window_brushes_toggles_and_the_resizable_panel_keeps_its_size() {
+    let mut h = app_harness();
+    let ctx = h.ctx.clone();
+    let invoke = |h: &mut egui_kittest::Harness<'_, PhotocraftApp>| {
+        crate::menus::invoke(h.state_mut(), &ctx, "window.panel.brushes", json!({})).unwrap();
+        h.run_steps(4);
+    };
+    let size = |h: &egui_kittest::Harness<'_, PhotocraftApp>| h.ctx.memory(|m| m.area_rect(egui::Id::new("brush-settings"))).map(|r| r.size());
+    invoke(&mut h);
+    assert!(h.state().ui.panels.brush_settings && h.state().ui.brush_tab == 1);
+    for tab in [1, 0] {
+        h.state_mut().ui.brush_tab = tab;
+        h.run_steps(4);
+        let settled = size(&h).expect("the panel is up");
+        assert!(settled.x >= WIDTH && settled.y > 300.0, "tab {tab}: {settled:?}");
+        h.run_steps(8);
+        assert_eq!(size(&h), Some(settled), "tab {tab} keeps its size");
+    }
+    // From the Brush Settings tab the command switches to Brushes; from Brushes it hides the panel.
+    invoke(&mut h);
+    assert!(h.state().ui.panels.brush_settings && h.state().ui.brush_tab == 1);
+    invoke(&mut h);
+    assert!(!h.state().ui.panels.brush_settings);
+    invoke(&mut h);
+    assert!(h.state().ui.panels.brush_settings && h.state().ui.brush_tab == 1);
+}

@@ -3,8 +3,9 @@
 //! winit 0.30 drops tablet data on both, so `photocraft-tablet` reads it beside winit (an AppKit
 //! local event monitor; XInput2 raw events on a second X connection) and this module writes each
 //! sample into the UI's [`StylusFeed`], where the canvas reads it exactly like the web runner's
-//! Pointer Events and automation's simulated pen. Windows needs nothing here: winit forwards
-//! `WM_POINTER` pressure as touch force.
+//! Pointer Events and automation's simulated pen. On Windows winit forwards `WM_POINTER`
+//! pressure as touch force but drops tilt, rotation and the eraser end, so a window subclass
+//! reads the pen info of each message into the feed as well.
 //!
 //! Wayland compositors give a pen only to clients that bind the tablet protocol
 //! (`zwp_tablet_v2`), which winit 0.30 doesn't (and binding it on winit's connection needs
@@ -34,6 +35,16 @@ pub fn sink(feed: StylusFeed) -> impl Fn(Option<Sample>) + Send + 'static {
 #[cfg(target_os = "macos")]
 pub fn install_macos(feed: &StylusFeed) -> Option<photocraft_tablet::macos::Monitor> {
     photocraft_tablet::macos::Monitor::install(sink(feed.clone())).map_err(|e| log::warn!("{e}")).ok()
+}
+
+/// Subclass the window for pen tilt, rotation and the eraser end (winit forwards only the
+/// pressure). Keep the result until the event loop returns. On failure this logs why: pens then
+/// paint with pressure only.
+#[cfg(target_os = "windows")]
+pub fn install_windows(feed: &StylusFeed, cc: &eframe::CreationContext<'_>) -> Option<photocraft_tablet::windows::Monitor> {
+    use eframe::wgpu::rwh::{HasWindowHandle, RawWindowHandle};
+    let RawWindowHandle::Win32(h) = cc.window_handle().ok()?.as_raw() else { return None };
+    photocraft_tablet::windows::Monitor::install(h.hwnd.get(), sink(feed.clone())).map_err(|e| log::warn!("{e}")).ok()
 }
 
 /// The display server to open the window on: the session's own, except Xwayland on Wayland when

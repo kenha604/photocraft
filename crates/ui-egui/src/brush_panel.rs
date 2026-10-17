@@ -45,9 +45,26 @@ pub const SECTIONS: [(&str, bool); 13] = [
     ("Protect Texture", true),
 ];
 
-/// Panel width and the stroke strip's size.
+/// The panel's default width and the stroke strip's size at that width.
 pub(crate) const WIDTH: f32 = 540.0;
 const STRIP: (u32, u32) = (488, 76);
+/// The panel's default height and the narrowest it can be dragged (its edges resize it).
+const HEIGHT: f32 = 640.0;
+const MIN_WIDTH: f32 = 420.0;
+
+/// The height a tab's stretching area (the section's controls, the preset list) gets: what the
+/// window offers minus what the tab's fixed rows took last frame (`overhead` on the first frame),
+/// at least `min`. Pair with [`remember_overhead`] at the end of the tab.
+pub(crate) fn stretch_height(ui: &egui::Ui, tab: &str, overhead: f32, min: f32) -> f32 {
+    let overhead = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::new(("brush-panel-overhead", tab)))).unwrap_or(overhead);
+    (ui.available_height() - overhead).max(min)
+}
+
+/// Record what the tab that started at `top` took besides its stretching area of height `area`.
+pub(crate) fn remember_overhead(ui: &egui::Ui, tab: &str, top: f32, area: f32) {
+    let overhead = (ui.min_rect().bottom() - top - area).max(0.0);
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("brush-panel-overhead", tab)), overhead));
+}
 
 /// How the Brushes tab lists presets.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -316,17 +333,21 @@ fn settings_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let before = app.session.tools.brush.clone();
     let mut b = before.clone();
     let section = app.ui.brush_section.min(SECTIONS.len() - 1);
+    // Resizing the window keeps the section list's width and gives the rest to the section's
+    // controls; its height goes to their scroll area (never shorter than the section list).
+    let (top, width) = (ui.cursor().top(), ui.available_width());
+    let scroll = stretch_height(ui, "settings", 150.0, 300.0);
     ui.horizontal_top(|ui| {
         section_list(app, ui, &mut b);
-        widgets::vline(ui, 482.0);
+        widgets::vline(ui, scroll + 32.0);
         ui.vertical(|ui| {
-            ui.set_width(WIDTH - 190.0);
+            ui.set_width(width - 190.0);
             let name = SECTIONS.get(section).map_or("Brush Tip Shape", |entry| entry.0);
             ui.label(RichText::new(tl!(name)).font(theme::semibold(12.5)).color(t.text));
             ui.add_space(6.0);
             let on = section_flag(&mut b, section).is_none_or(|f| *f);
-            egui::ScrollArea::vertical().id_salt(("brush-section", section)).max_height(450.0).auto_shrink([false, false]).show(ui, |ui| {
-                ui.set_width(WIDTH - 204.0);
+            egui::ScrollArea::vertical().id_salt(("brush-section", section)).max_height(scroll).auto_shrink([false, false]).show(ui, |ui| {
+                ui.set_width(width - 204.0);
                 // A section that's off shows its options greyed out (Photoshop). A tip picked in
                 // the grid copies the tip fields only — the dynamics sections stay (Photoshop).
                 // The picked preset is recorded by name (`brush.presets.setCurrent`, identity, so
@@ -342,9 +363,11 @@ fn settings_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     widgets::hairline(ui);
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        let (r, _) = ui.allocate_exact_size(vec2(STRIP.0 as f32, STRIP.1 as f32), Sense::hover());
+        // The strip follows the panel's width, rendered at the width it shows at.
+        let strip = (STRIP.0 as f32 + width - WIDTH).round().max(120.0);
+        let (r, _) = ui.allocate_exact_size(vec2(strip, STRIP.1 as f32), Sense::hover());
         ui.painter().rect_filled(r, t.radius_sm, t.field);
-        let tex = brush_preview::stroke_texture(ui.ctx(), "settings-strip", &b, STRIP.0, STRIP.1, t.text);
+        let tex = brush_preview::stroke_texture(ui.ctx(), "settings-strip", &b, strip as u32, STRIP.1, t.text);
         ui.painter().image(tex.id(), r, full_uv(), Color32::WHITE);
         ui.vertical(|ui| {
             if icons::button(ui, "square-plus", 24.0, false, tl!("Create new brush from these settings")).clicked() {
@@ -365,6 +388,7 @@ fn settings_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         });
     });
+    remember_overhead(ui, "settings", top, scroll);
     commit_gesture(app, ui.ctx(), &before, &b);
 }
 
@@ -384,11 +408,13 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     egui::Window::new(tl!("Brush Settings"))
         .id(egui::Id::new("brush-settings"))
         .title_bar(false)
-        .resizable(false)
+        .resizable(true)
+        .default_size(vec2(WIDTH, HEIGHT))
+        .min_width(MIN_WIDTH)
         .frame(frame)
         .default_pos(egui::pos2((canvas.right() - WIDTH - 30.0).max(canvas.left() + 8.0), canvas.top() + 24.0))
         .show(ctx, |ui| {
-            ui.set_width(WIDTH);
+            ui.set_width(ui.available_width().max(MIN_WIDTH));
             ui.horizontal(|ui| {
                 let mut tab = app.ui.brush_tab;
                 for (i, name) in [tl!("Brush Settings"), tl!("Brushes")].iter().enumerate() {

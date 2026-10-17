@@ -17,7 +17,7 @@ use photocraft_engine::paint::{BrushPreset, MAX_BRUSH_SIZE};
 use serde_json::json;
 
 use crate::brush_panel::{
-    BrushesPanelState, BrushesView, Renaming, UNGROUPED, WIDTH, commit_gesture, full_uv, grouped_presets, new_preset_name, run_or_status,
+    BrushesPanelState, BrushesView, Renaming, UNGROUPED, commit_gesture, full_uv, grouped_presets, new_preset_name, run_or_status,
 };
 use crate::brush_preview;
 use crate::theme::{self, Tokens};
@@ -872,10 +872,13 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // Size of the current brush (Photoshop's Brushes panel slider).
     let before = app.session.tools.brush.clone();
     let mut b = before.clone();
+    // The window's edges resize it: the rows follow its width, the preset list takes its height.
+    let (top, width) = (ui.cursor().top(), ui.available_width());
+    let list = crate::brush_panel::stretch_height(ui, "brushes", 130.0, 160.0);
     ui.horizontal(|ui| {
         ui.label(RichText::new(tl!("Size")).color(t.text_dim));
         let mut lv = b.size.max(1.0).ln();
-        ui.add_sized(vec2(WIDTH - 140.0, 18.0), |ui: &mut egui::Ui| {
+        ui.add_sized(vec2(width - 140.0, 18.0), |ui: &mut egui::Ui| {
             let r = widgets::slider(ui, &mut lv, 0.0..=MAX_BRUSH_SIZE.ln(), None);
             if r.changed() {
                 b.size = lv.exp().round().clamp(1.0, MAX_BRUSH_SIZE);
@@ -892,7 +895,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         icons::paint(ui, egui::Rect::from_min_size(ui.cursor().min + vec2(0.0, 3.0), vec2(16.0, 16.0)), "search", 14.0, t.text_faint);
         ui.add_space(20.0);
-        ui.add(egui::TextEdit::singleline(&mut app.ui.brushes_panel.filter).hint_text(tl!("Search Brushes")).desired_width(WIDTH - 120.0));
+        ui.add(egui::TextEdit::singleline(&mut app.ui.brushes_panel.filter).hint_text(tl!("Search Brushes")).desired_width(width - 120.0));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let view = &mut app.ui.brushes_panel.view;
             let grid_tip = "Grid view";
@@ -906,7 +909,11 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         });
     });
     ui.add_space(6.0);
-    let acts = preset_list(ui, &app.session.tools.presets, app.session.tools.current_preset.as_deref(), &mut app.ui.brushes_panel, PANEL_LIST);
+    let list_top = ui.cursor().top();
+    let layout = ListLayout { max_height: list, ..PANEL_LIST };
+    let acts = preset_list(ui, &app.session.tools.presets, app.session.tools.current_preset.as_deref(), &mut app.ui.brushes_panel, layout);
+    // A short list ends before its share of the height: count what it took.
+    let list = ui.min_rect().bottom() - list_top;
     apply(app, acts);
     ui.add_space(4.0);
     widgets::hairline(ui);
@@ -932,6 +939,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         });
     });
+    crate::brush_panel::remember_overhead(ui, "brushes", top, list);
     // Forget previews of presets that no longer exist.
     let names: std::collections::HashSet<&str> = app.session.tools.presets.iter().map(|p| p.name.as_str()).collect();
     brush_preview::with_cache(ui.ctx(), |c| {

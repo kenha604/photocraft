@@ -43,8 +43,8 @@ mod monitor_profile;
 mod photoshop_settings;
 mod screen_color;
 mod services;
-// Windows gets pen pressure from winit (WM_POINTER); the web runner has its own listener.
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
+// The web runner has its own listener.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows", test))]
 mod tablet;
 mod ui_state;
 mod window_frame;
@@ -78,7 +78,7 @@ fn native_options(custom_titlebar: bool) -> eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_icon(app_icon::window_icon())
             .with_app_id(APP_ID)
-            .with_title("PhotoCraft")
+            .with_title("KenShoppe")
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([760.0, 480.0])
             .with_drag_and_drop(true)
@@ -149,6 +149,15 @@ mod control_port_tests {
         assert!(parse_control_port("--safe-gpu", "--control").is_err());
         assert!(parse_control_port("", "--control").is_err());
     }
+}
+
+/// Which start-up splash artwork this start shows: one further than the last start, counted in
+/// the settings directory (0 when there is none to count in).
+fn next_splash() -> usize {
+    let Some(path) = app_dirs::config_dir().map(|d| d.join("splash-index")) else { return 0 };
+    let n = std::fs::read_to_string(&path).ok().and_then(|s| s.trim().parse::<usize>().ok()).map_or(0, |n| n.wrapping_add(1));
+    let _ = std::fs::write(&path, n.to_string());
+    n
 }
 
 fn main() -> eframe::Result {
@@ -288,11 +297,11 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     let apple_events = &apple_events;
 
-    // The macOS pen tablet monitor (installed once eframe created the app, see below); it lives
-    // until the event loop returns.
-    #[cfg(target_os = "macos")]
+    // The macOS / Windows pen tablet monitor (installed once eframe created the app, see below);
+    // it lives until the event loop returns.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     let tablet_monitor = std::cell::OnceCell::new();
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     let tablet_monitor = &tablet_monitor;
 
     // Read the displays' ICC profiles while the window opens (colour-managed canvas; `None`
@@ -368,6 +377,7 @@ fn main() -> eframe::Result {
                 }
             }
             let mut app = PhotocraftApp::new(Session::new(), services);
+            app.splash = Some(photocraft_ui_egui::splash::Splash::for_start(next_splash()));
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.custom_titlebar = custom_titlebar;
             // Only the title bar's free gap drags the window, never the menus (mac_window.rs).
@@ -479,6 +489,10 @@ fn main() -> eframe::Result {
             // AppKit's shared application only exists once winit created it (#759).
             #[cfg(target_os = "macos")]
             if let Some(monitor) = tablet::install_macos(&app.stylus.feed) {
+                let _ = tablet_monitor.set(monitor);
+            }
+            #[cfg(target_os = "windows")]
+            if let Some(monitor) = tablet::install_windows(&app.stylus.feed, cc) {
                 let _ = tablet_monitor.set(monitor);
             }
             #[cfg(target_os = "linux")]

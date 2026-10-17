@@ -97,7 +97,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("help.github", "PhotoCraft on GitHub", &["Help"], None),
     ("help.reportIssue", "Report an Issue…", &["Help"], None),
     ("help.systemInfo", "System Info…", &["Help"], None),
-    ("help.about", "About PhotoCraft", &["Help"], None),
+    ("help.about", "About KenShoppe", &["Help"], None),
 ];
 
 /// Window › <document>: the open documents, listed at the end of the Window menu as in Photoshop.
@@ -215,8 +215,9 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         return r;
     }
     if id == "window.panel.brushes" {
-        // Window › Brushes opens the Brush Settings window on its presets tab.
-        app.ui.panels.brush_settings = true;
+        // Window › Brushes shows the Brush Settings window on its presets tab; with that tab
+        // already up, it hides the window again (as the Brush Settings command does).
+        app.ui.panels.brush_settings = !(app.ui.panels.brush_settings && app.ui.brush_tab == 1);
         app.ui.brush_tab = 1;
         return Ok(Value::Null);
     }
