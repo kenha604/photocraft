@@ -64,10 +64,9 @@ fn validate(p: &Value) -> Result<()> {
         Some(Value::String(s)) => {
             crate::commands::parse_hex(s).ok_or_else(|| bad(format!("`color` must be \"#rrggbb\", not {s:?}")))?;
         }
+        Some(Value::Array(a)) if (3..=4).contains(&a.len()) && a.iter().all(|v| v.as_f64().is_some_and(|x| x.is_finite() && (0.0..=1.0).contains(&x))) => {}
         Some(Value::Array(a)) if (3..=4).contains(&a.len()) => {
-            if !a.iter().all(|v| v.as_f64().is_some_and(|x| x.is_finite() && (0.0..=1.0).contains(&x))) {
-                return Err(bad("`color` as an array must hold 3 or 4 numbers in 0..1"));
-            }
+            return Err(bad("`color` as an array must hold 3 or 4 numbers in 0..1"));
         }
         Some(_) => return Err(bad("`color` must be \"#rrggbb\" or [r, g, b] in 0..1")),
     }
@@ -92,7 +91,7 @@ fn enabled(s: &Session) -> std::result::Result<(), String> {
     if locks.pixels || locks.all {
         return Err(format!("the layer \"{}\" is locked", l.name));
     }
-    if locks.transparency && !crate::extra_cmds::is_background(l) {
+    if locks.transparency && !d.doc.is_background(l.id) {
         return Err(format!("the transparency of layer \"{}\" is locked", l.name));
     }
     Ok(())
@@ -217,7 +216,7 @@ mod tests {
         s.execute("edit.undo", json!({})).unwrap();
         assert_eq!(name(&s), "Background");
         let d = s.active().unwrap();
-        assert!(crate::extra_cmds::is_background(d.doc.layer(d.active_layer.unwrap()).unwrap()));
+        assert!(d.doc.is_background(d.active_layer.unwrap()));
     }
 
     #[test]

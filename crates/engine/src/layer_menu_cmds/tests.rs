@@ -141,6 +141,24 @@ fn global_light_blending_options_scale_effects() {
 }
 
 #[test]
+fn global_light_rejects_numbers_beyond_f32() {
+    let mut s = session(8, "rgb");
+    // In-range values still wrap into -180..=180 and clamp to 0..=90.
+    s.execute("layer.layerStyle.globalLight", json!({"angle": 450, "altitude": 120})).unwrap();
+    assert_eq!((doc(&s).global_light.angle, doc(&s).global_light.altitude), (90.0, 90.0));
+    s.execute("layer.layerStyle.globalLight", json!({"angle": 540, "altitude": 30})).unwrap();
+    assert_eq!((doc(&s).global_light.angle.abs(), doc(&s).global_light.altitude), (180.0, 30.0));
+    let before = doc(&s).global_light;
+    let steps = s.active().unwrap().history.past_len();
+    // 1e39 overflowed f32 to inf, which rem_euclid turned into a stored NaN (#4181).
+    for p in [json!({"angle": 1e39}), json!({"angle": -1e39}), json!({"altitude": 1e39}), json!({"altitude": -1e39})] {
+        assert!(s.execute("layer.layerStyle.globalLight", p.clone()).is_err(), "{p}");
+        assert_eq!(doc(&s).global_light, before, "{p}");
+        assert_eq!(s.active().unwrap().history.past_len(), steps, "{p}");
+    }
+}
+
+#[test]
 fn blending_options_blend_if() {
     for depth in DEPTHS {
         let mut s = session(depth, "rgb");
@@ -447,16 +465,13 @@ fn stack_mode_rejects_sources_without_visible_layers() {
 
 #[test]
 fn reveal_in_finder_dry_run_and_enabled() {
+    let link = std::env::temp_dir().join("pics").join("a.png").to_string_lossy().into_owned();
     let mut s = session(8, "rgb");
     assert!(!s.is_enabled("layer.smartObjects.revealInFinder"));
     s.edit("linked", |doc, active| {
         let mut l = Layer::new(
             "linked",
-            LayerContent::Smart(photocraft_doc::SmartObject::new(
-                SmartSource::Linked { path: "/tmp/pics/a.png".into() },
-                photocraft_geom::Affine::IDENTITY,
-                None,
-            )),
+            LayerContent::Smart(photocraft_doc::SmartObject::new(SmartSource::Linked { path: link.clone() }, photocraft_geom::Affine::IDENTITY, None)),
         );
         l.visible = true;
         *active = Some(doc.insert_above(*active, l));
@@ -465,9 +480,39 @@ fn reveal_in_finder_dry_run_and_enabled() {
     .unwrap();
     assert!(s.is_enabled("layer.smartObjects.revealInFinder"));
     let r = s.execute("layer.smartObjects.revealInFinder", json!({"dryRun": true})).unwrap();
-    let (prog, args) = reveal_command("/tmp/pics/a.png");
+    let (prog, args) = reveal_command(&link).unwrap();
     assert_eq!(r["program"], json!(prog));
     assert_eq!(r["args"], json!(args));
+}
+
+#[test]
+fn reveal_follows_linked_paths_like_the_link_and_passes_paths_as_paths() {
+    let mut s = session(8, "rgb");
+    let folder = std::env::temp_dir().join("pics");
+    s.active_mut().unwrap().path = Some(folder.join("doc.pcraft").to_string_lossy().into_owned());
+    let mut link = |path: &str| {
+        s.edit("linked", |doc, active| {
+            let so = photocraft_doc::SmartObject::new(SmartSource::Linked { path: path.into() }, photocraft_geom::Affine::IDENTITY, None);
+            *active = Some(doc.insert_above(*active, Layer::new("linked", LayerContent::Smart(so))));
+            Ok(())
+        })
+        .unwrap();
+        s.execute("layer.smartObjects.revealInFinder", json!({"dryRun": true})).map_err(|e| e.to_string())
+    };
+    let err = link(r"\\192.0.2.1\share\x.png").unwrap_err();
+    assert!(err.contains("is not opened: the path is on another computer"), "{err}");
+    // A relative link is shown next to the document.
+    let r = link("a.png").unwrap();
+    assert_eq!(r["args"], json!(reveal_command(&folder.join("a.png").to_string_lossy()).unwrap().1));
+    // The document's own file is shown wherever it is, a network share included.
+    s.active_mut().unwrap().path = Some(r"\\192.0.2.1\share\doc.psd".into());
+    s.execute("file.revealInFinder", json!({"dryRun": true})).unwrap();
+
+    assert_eq!(reveal_command_on("macos", "-a.png").unwrap(), ("open", vec!["-R".to_string(), "--".into(), "-a.png".into()]));
+    assert_eq!(reveal_command_on("windows", r"C:\pics\a.png").unwrap(), ("explorer", vec![r"/select,C:\pics\a.png".to_string()]));
+    for path in [r"C:\pics\a,b.png", r#"C:\pics\a".png"#] {
+        assert!(reveal_command_on("windows", path).is_err(), "{path}");
+    }
 }
 
 #[test]
@@ -570,7 +615,7 @@ fn transfer_effects_moves_or_copies_between_layers() {
     for bad in [
         json!({"from": a.0, "to": a.0}),
         json!({"from": a.0}),
-        json!({"from": a.0, "to": 9999}),
+        json!({"from": a.0, "to": u64::MAX}),
         json!({"from": a.0, "to": b.0, "effect": 7}),
         json!({"from": a.0, "to": b.0, "effect": -1}),
         json!({"from": b.0, "to": a.0}),

@@ -63,17 +63,9 @@ pub fn dropdown_options() -> Vec<(String, &'static str)> {
     v
 }
 
-/// The unit a suffix names (`in`, `cm`, `mm`, `px`, `pt`, `pica`, and their long forms).
+/// The unit a suffix names ([`Unit::from_suffix`]); a crop size has no percent.
 fn unit_of(suffix: &str) -> Option<Unit> {
-    Some(match suffix.to_ascii_lowercase().as_str() {
-        "px" | "pixel" | "pixels" => Unit::Pixels,
-        "in" | "inch" | "inches" | "\"" => Unit::Inches,
-        "cm" | "centimeter" | "centimeters" | "centimetre" | "centimetres" => Unit::Centimeters,
-        "mm" | "millimeter" | "millimeters" | "millimetre" | "millimetres" => Unit::Millimeters,
-        "pt" | "point" | "points" => Unit::Points,
-        "pica" | "picas" => Unit::Picas,
-        _ => return None,
-    })
+    Unit::from_suffix(suffix).filter(|u| *u != Unit::Percent)
 }
 
 /// A typed length: a positive number and an optional unit ("4 in", "4in", "10,5 cm", "1024").
@@ -154,6 +146,14 @@ pub fn ratio(o: &ToolOptions, doc_dpi: f64) -> Option<f64> {
     Some(w / h).filter(|k| k.is_finite() && *k > 0.0)
 }
 
+/// Decimals a custom ratio side keeps and shows: 1.414 : 1 (ISO A sizes) as in Photoshop (#6487).
+pub const RATIO_DECIMALS: u32 = 3;
+
+/// A ratio side as stored in a `crop_ratio` key ("1.414", "16").
+pub fn fmt_ratio(v: f64) -> String {
+    crate::widgets::fmt_num_prec(v, RATIO_DECIMALS)
+}
+
 /// Editable W and H shown for a custom aspect ratio. An existing valid ratio is authoritative;
 /// when either side is zero, use the in-progress values retained in ToolOptions.
 pub fn custom_ratio_fields(o: &ToolOptions, doc_size: (f64, f64)) -> (f32, f32) {
@@ -178,7 +178,7 @@ pub fn set_custom_ratio_fields(o: &mut ToolOptions, width: f32, height: f32) {
     o.crop_custom_ratio_width = width;
     o.crop_custom_ratio_height = height;
     if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 {
-        o.crop_ratio = format!("{}:{}", crate::widgets::fmt_num(f64::from(width)), crate::widgets::fmt_num(f64::from(height)));
+        o.crop_ratio = format!("{}:{}", fmt_ratio(f64::from(width)), fmt_ratio(f64::from(height)));
     } else {
         o.crop_ratio.clear();
     }
@@ -356,6 +356,15 @@ mod tests {
     }
 
     #[test]
+    fn custom_ratio_keeps_three_decimals() {
+        // #6487: 1.414 : 1 (ISO A sizes) stays 1.414, not 1.4, as in Photoshop.
+        let mut options = ToolOptions::default();
+        set_custom_ratio_fields(&mut options, 1.414, 1.0);
+        assert_eq!(options.crop_ratio, "1.414:1");
+        assert_eq!(custom_ratio_fields(&options, (0.0, 0.0)), (1.414, 1.0));
+    }
+
+    #[test]
     fn selecting_free_ratio_clears_previous_custom_dimensions() {
         let mut options = ToolOptions { crop_ratio: "16:9".into(), ..ToolOptions::default() };
         select_custom_ratio(&mut options);
@@ -375,7 +384,8 @@ mod tests {
         assert_eq!(parse_length("1024 px", Unit::Inches), Some((1024.0, Unit::Pixels)));
         assert_eq!(parse_length("8,5 in", Unit::Pixels), Some((8.5, Unit::Inches)));
         assert_eq!(parse_length("12", Unit::Centimeters), Some((12.0, Unit::Centimeters)), "a bare number keeps the field's unit");
-        for bad in ["", "in", "0 in", "-4 in", "4 furlongs", "NaN", "1e400 px", "4 in 5"] {
+        assert_eq!(parse_length("3 pc", Unit::Pixels), Some((3.0, Unit::Picas)), "the shared unit table");
+        for bad in ["", "in", "0 in", "-4 in", "4 furlongs", "NaN", "1e400 px", "4 in 5", "50 %", "50 percent"] {
             assert_eq!(parse_length(bad, Unit::Pixels), None, "{bad}");
         }
         assert_eq!(normalize_length("4in", ""), "4 in");

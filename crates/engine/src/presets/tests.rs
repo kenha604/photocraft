@@ -385,6 +385,43 @@ fn pattern_groups_select_apply_and_sync() {
     assert!(crate::pattern_cmds::resolve(&s, "Weave").is_none());
 }
 
+#[test]
+fn pattern_batch_delete_keeps_the_library_when_one_name_is_missing() {
+    let mut s = session(8);
+    let before = s.execute("pattern.presets.list", json!({})).unwrap();
+    let err = s.execute("pattern.presets.edit", json!({"action": "delete", "preset": ["Bricks", "missing"]})).unwrap_err();
+    assert!(err.to_string().contains("missing"), "{err}");
+    assert_eq!(s.execute("pattern.presets.list", json!({})).unwrap(), before);
+    assert!(crate::pattern_cmds::resolve(&s, "Bricks").is_some());
+}
+
+#[test]
+fn pattern_batch_delete_rejects_non_string_members_without_deleting() {
+    for invalid in [json!(null), json!(7), json!({})] {
+        let mut s = session(8);
+        let before = s.execute("pattern.presets.list", json!({})).unwrap();
+        assert!(s.execute("pattern.presets.edit", json!({"action": "delete", "preset": ["Bricks", invalid]})).is_err());
+        assert_eq!(s.execute("pattern.presets.list", json!({})).unwrap(), before);
+    }
+}
+
+#[test]
+fn pattern_batch_delete_refuses_a_document_only_pattern_up_front() {
+    let mut s = session(8);
+    let added = s.execute("edit.definePattern", json!({"name": "Document Only"})).unwrap();
+    let id = added["pattern"].as_str().unwrap().to_string();
+    let pattern = s.patterns.items.iter().find(|p| p.id == id).unwrap().clone();
+    s.edit("Embed pattern fixture", |doc, _| {
+        doc.patterns.push(pattern.clone());
+        Ok(())
+    })
+    .unwrap();
+    s.execute("pattern.delete", json!({"pattern": id})).unwrap();
+    let before = s.patterns.items.clone();
+    assert!(s.execute("pattern.presets.edit", json!({"action": "delete", "preset": ["Bricks", id]})).is_err());
+    assert_eq!(s.patterns.items, before, "nothing is deleted when one entry is not in the library");
+}
+
 // ------------------------------------------------------------------ styles
 
 #[test]
@@ -710,4 +747,30 @@ fn clone_source_errors_and_overlay() {
     let v: Value = s.execute("cloneSource.set", json!({"source": [1, 1], "width": 5000, "rotation": 270})).unwrap();
     assert_eq!(v["width"], json!(1000.0));
     assert_eq!(v["rotation"], json!(-90.0));
+}
+
+// ------------------------------------------------------------------ persistence
+
+/// #5602: one damaged preset set in the preferences file must not discard the saved New
+/// Document presets (or any other set) at the next launch.
+#[test]
+fn a_damaged_preset_set_keeps_the_other_sets() {
+    let mut s = Session::new();
+    let settings = json!({"width": 1600, "height": 900, "resolution": 144});
+    s.execute("document.presets.save", json!({"name": "Banner", "settings": settings})).unwrap();
+    let saved = s.presets.to_json(&s);
+    for key in ["gradients", "gradient", "styles", "shapes", "pattern_groups", "custom_shapes", "layer_defaults", "swatches"] {
+        let mut blob = saved.clone();
+        blob[key] = json!("not a preset set");
+        let mut next = Session::new();
+        next.load_presets_json(blob);
+        assert_eq!(next.presets.documents, s.presets.documents, "damaged `{key}`");
+        assert_eq!(next.presets.tool_presets.len(), Session::new().presets.tool_presets.len(), "damaged `{key}`");
+    }
+    // Null sets keep their defaults, as before.
+    let mut next = Session::new();
+    next.load_presets_json(json!({"tool_presets": null, "gradients": null, "documents": saved["documents"].clone()}));
+    assert_eq!(next.presets.tool_presets.len(), Session::new().presets.tool_presets.len());
+    assert_eq!(next.presets.gradients.len(), Session::new().presets.gradients.len());
+    assert_eq!(next.presets.documents, s.presets.documents);
 }
