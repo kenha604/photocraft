@@ -232,11 +232,14 @@ fn b_cycles_brush_pencil_mixer_brush_and_color_replacement() {
     };
     press(&mut h, Modifiers::NONE);
     assert_eq!(h.state().ui.tool, Tool::Brush);
+    // Custom: B again keeps the Brush, whatever the preference; ⇧B cycles.
     press(&mut h, Modifiers::NONE);
+    assert_eq!(h.state().ui.tool, Tool::Brush);
+    press(&mut h, Modifiers::SHIFT);
     assert_eq!(h.state().ui.tool, Tool::Pencil);
-    press(&mut h, Modifiers::NONE);
+    press(&mut h, Modifiers::SHIFT);
     assert_eq!(h.state().ui.tool, Tool::MixerBrush);
-    press(&mut h, Modifiers::NONE);
+    press(&mut h, Modifiers::SHIFT);
     assert_eq!(h.state().ui.tool, Tool::ColorReplacement);
     // Use Shift Key for Tool Switch: ⇧B cycles, B keeps the group's tool.
     h.state_mut().session.edit_prefs(|p| p.tools.use_shift_key_for_tool_switch = true);

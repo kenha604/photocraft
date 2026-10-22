@@ -1,5 +1,5 @@
-//! The menu bar from the keyboard (#4988), as Photoshop's on Windows: a tap on Alt (or F10)
-//! puts the keyboard on the bar (File lit; ← / → move along it, ↓ / ↩ / Space open the lit menu,
+//! The menu bar from the keyboard (#4988), as Photoshop's on Windows: F10 (custom: no longer a
+//! tap on Alt, which fought Alt + wheel zoom) puts the keyboard on the bar (File lit; ← / → move along it, ↓ / ↩ / Space open the lit menu,
 //! Esc or a click leaves), Alt+letter opens the menu with that mnemonic straight away, and in an
 //! open menu a letter runs the row with that mnemonic (or opens its submenu).
 //!
@@ -173,7 +173,7 @@ impl Keys {
                     self.alt_down = false;
                     tap |= std::mem::take(&mut self.alt_tap);
                 }
-                Event::Key { pressed: true, .. } | Event::Text(_) | Event::PointerButton { pressed: true, .. } => self.alt_tap = false,
+                Event::Key { pressed: true, .. } | Event::Text(_) | Event::PointerButton { pressed: true, .. } | Event::MouseWheel { .. } => self.alt_tap = false,
                 _ => {}
             }
         }
@@ -234,9 +234,11 @@ impl Keys {
             }
             return;
         }
-        // No menu open: Alt (tapped) or F10 puts the keyboard on the bar or takes it off again.
+        // No menu open: F10 puts the keyboard on the bar or takes it off again. Custom: a tap on
+        // Alt alone no longer focuses the bar (it kept firing after Alt + wheel zoom); it only
+        // takes an F10 focus off again. Alt+letter still opens a menu.
         let f10 = consume(Modifiers::NONE, Key::F10);
-        if tap || f10 {
+        if f10 || (tap && self.focus.is_some()) {
             self.focus = if self.focus.is_some() { None } else { Some(0) };
             self.underline = false;
             ctx.request_repaint();

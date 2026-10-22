@@ -52,8 +52,19 @@ fn rows(h: &Harness<'static, PhotocraftApp>, level: usize) -> Vec<crate::menu_na
 fn alt_focuses_the_bar_arrows_move_and_down_opens_the_lit_menu() {
     let mut h = bar();
     assert_eq!(Keys::current(&h.ctx).focus, None);
+    // Custom: Alt alone never takes the keyboard to the bar, also after Alt + wheel zoom.
     alt_tap(&mut h);
-    assert_eq!(Keys::current(&h.ctx).focus, Some(0), "Alt puts the keyboard on File");
+    assert_eq!(Keys::current(&h.ctx).focus, None, "a tap on Alt leaves the bar alone");
+    h.key_down(egui::Key::AltLeft);
+    h.run_steps(1);
+    h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: egui::vec2(0.0, 1.0), modifiers: egui::Modifiers::ALT, phase: egui::TouchPhase::Move });
+    h.run_steps(1);
+    h.key_up(egui::Key::AltLeft);
+    h.run_steps(3);
+    assert_eq!(Keys::current(&h.ctx).focus, None, "Alt + wheel leaves the bar alone");
+    assert!(!is_open(&h.ctx));
+    key(&mut h, egui::Key::F10);
+    assert_eq!(Keys::current(&h.ctx).focus, Some(0), "F10 puts the keyboard on File");
     assert!(crate::menu_keys::is_focused(&h.ctx), "the shortcuts wait for the bar");
     assert!(!is_open(&h.ctx), "no menu opens yet");
     key(&mut h, egui::Key::ArrowRight);
@@ -79,10 +90,10 @@ fn alt_focuses_the_bar_arrows_move_and_down_opens_the_lit_menu() {
 #[test]
 fn a_second_alt_or_esc_or_a_click_takes_the_keyboard_off_the_bar() {
     let mut h = bar();
-    alt_tap(&mut h);
+    key(&mut h, egui::Key::F10);
     assert_eq!(Keys::current(&h.ctx).focus, Some(0));
     alt_tap(&mut h);
-    assert_eq!(Keys::current(&h.ctx).focus, None, "a second tap leaves");
+    assert_eq!(Keys::current(&h.ctx).focus, None, "a tap on Alt leaves");
     key(&mut h, egui::Key::F10);
     assert_eq!(Keys::current(&h.ctx).focus, Some(0), "F10 focuses the bar too");
     key(&mut h, egui::Key::Escape);

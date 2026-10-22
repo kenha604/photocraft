@@ -424,13 +424,13 @@ mod tests {
         assert_eq!(boards(&app), vec![photocraft_geom::Rect::new(20, 30, 160, 100)]);
     }
 
-    /// V picks the Move group, ⇧V cycles Move ↔ Artboard as in Photoshop.
+    /// V picks the Move group, ⇧V cycles Move ↔ Artboard as in Photoshop. Custom: V never
+    /// cycles; it keeps the group's tool you picked.
     #[test]
     fn shift_v_cycles_move_and_artboard() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
         let ctx = egui::Context::default();
-        let press = |app: &mut PhotocraftApp, modifiers| {
-            let key = egui::Key::V;
+        let press = |app: &mut PhotocraftApp, key: egui::Key, modifiers| {
             let raw = egui::RawInput {
                 events: vec![
                     egui::Event::ModifiersChanged(modifiers),
@@ -443,26 +443,25 @@ mod tests {
             crate::shortcuts::handle(app, &ctx);
             ctx.end_pass().textures_delta.clear();
         };
-        app.ui.tool = Tool::Brush;
-        press(&mut app, egui::Modifiers::NONE);
-        assert_eq!(app.ui.tool, Tool::Move);
-        // Custom: pressing V again keeps the Move tool instead of cycling.
-        press(&mut app, egui::Modifiers::NONE);
-        assert_eq!(app.ui.tool, Tool::Move);
-        press(&mut app, egui::Modifiers::SHIFT);
-        assert_eq!(app.ui.tool, Tool::Artboard);
-        // ... and V from the Artboard tool goes back to Move.
-        press(&mut app, egui::Modifiers::NONE);
-        assert_eq!(app.ui.tool, Tool::Move);
-        press(&mut app, egui::Modifiers::SHIFT);
-        assert_eq!(app.ui.tool, Tool::Artboard);
-        press(&mut app, egui::Modifiers::SHIFT);
-        assert_eq!(app.ui.tool, Tool::Move);
-        // With Use Shift Key for Tool Switch on, V still lands on Move.
-        app.session.edit_prefs(|p| p.tools.use_shift_key_for_tool_switch = true);
-        press(&mut app, egui::Modifiers::SHIFT);
-        assert_eq!(app.ui.tool, Tool::Artboard);
-        press(&mut app, egui::Modifiers::NONE);
-        assert_eq!(app.ui.tool, Tool::Move);
+        let v = egui::Key::V;
+        for shift_switch in [false, true] {
+            app.session.edit_prefs(|p| p.tools.use_shift_key_for_tool_switch = shift_switch);
+            app.ui.tool = Tool::Brush;
+            app.ui.group_tools.clear();
+            press(&mut app, v, egui::Modifiers::NONE);
+            assert_eq!(app.ui.tool, Tool::Move);
+            press(&mut app, v, egui::Modifiers::NONE);
+            assert_eq!(app.ui.tool, Tool::Move, "V again keeps Move");
+            press(&mut app, v, egui::Modifiers::SHIFT);
+            assert_eq!(app.ui.tool, Tool::Artboard);
+            press(&mut app, v, egui::Modifiers::NONE);
+            assert_eq!(app.ui.tool, Tool::Artboard, "V keeps the Artboard tool picked with ⇧V");
+            press(&mut app, v, egui::Modifiers::SHIFT);
+            assert_eq!(app.ui.tool, Tool::Move);
+            // From another tool, V brings back the group's last pick.
+            press(&mut app, egui::Key::B, egui::Modifiers::NONE);
+            press(&mut app, v, egui::Modifiers::NONE);
+            assert_eq!(app.ui.tool, Tool::Move, "pref {shift_switch}");
+        }
     }
 }

@@ -629,14 +629,12 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         return;
     }
-    // Tool keys; pressing the key of the current group cycles within it. With Preferences ›
-    // Tools › Use Shift Key for Tool Switch, only ⇧+key cycles and the plain key keeps the
-    // group's current tool. From another group, the key picks the group's last-used tool.
+    // Tool keys. Custom: a tool key never cycles its group; it selects the group's tool you
+    // already picked (the current one, or the one you used last in that group). ⇧+key cycles
+    // within the group, whatever Preferences › Tools › Use Shift Key for Tool Switch says.
     // A held tool letter is a spring-loaded tool (#2672), not a burst of presses: its key
     // repeats are dropped rather than cycling the group.
     ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { key, pressed: true, repeat: true, .. } if crate::spring_tools::is_tool_key(*key))));
-    // Custom: plain V always selects the Move tool (pressing it again keeps Move rather than
-    // cycling to the Artboard tool); ⇧V still cycles Move ↔ Artboard.
     let shift_switch = app.session.prefs().tools.use_shift_key_for_tool_switch;
     let shift_held = ctx.input(|i| i.modifiers.shift);
     for t in Tool::ALL {
@@ -644,14 +642,17 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
             continue;
         }
         let Some(k) = crate::spring_tools::key_of(t.key()) else { continue };
+        // Whether this key's press carries ⇧ (read before `consume_key`, which ignores an extra ⇧).
+        let shift_press =
+            shift_held || ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { key, pressed: true, modifiers, .. } if *key == k && modifiers.shift)));
         let cycle_shift = shift_switch && ctx.input_mut(|i| i.consume_key(Modifiers::SHIFT, k));
         if cycle_shift || pressed(k) {
+            let cycle = cycle_shift || shift_press;
             let before = app.ui.tool;
             let group: Vec<Tool> = Tool::ALL.iter().copied().filter(|x| x.key() == t.key() && crate::tool_shortcuts::uses_default(app, *x)).collect();
             app.ui.tool = match group.iter().position(|x| *x == app.ui.tool) {
-                _ if t.key() == Tool::Move.key() && !shift_held && group.contains(&Tool::Move) => Tool::Move,
-                Some(i) if shift_switch && !cycle_shift => group[i],
-                Some(i) => group[(i + 1) % group.len()],
+                Some(i) if cycle => group[(i + 1) % group.len()],
+                Some(i) => group[i],
                 None => app.ui.group_tool(t.key()).filter(|last| group.contains(last)).unwrap_or(group[0]),
             };
             // `consume_key` ignores extra ⇧ and ⌥: a ⇧/⌥ switch is never spring-loaded.
@@ -692,7 +693,7 @@ mod tests {
             handle(app, &ctx);
             ctx.end_pass().textures_delta.clear();
         };
-        // Plain-key cycling (the pref is on by default, as in Photoshop).
+        // Custom: even with Use Shift Key for Tool Switch off, a plain key never cycles.
         app.session.edit_prefs(|p| p.tools.use_shift_key_for_tool_switch = false);
         // Polygonal Lasso picked from the toolbar flyout, then the Brush (#2608).
         app.ui.tool = Tool::PolygonLasso;
@@ -700,8 +701,10 @@ mod tests {
         assert_eq!(app.ui.tool, Tool::Brush);
         press(&mut app, Key::L, Modifiers::NONE);
         assert_eq!(app.ui.tool, Tool::PolygonLasso);
-        // Within the group, L still cycles; leaving and coming back keeps the new pick.
         press(&mut app, Key::L, Modifiers::NONE);
+        assert_eq!(app.ui.tool, Tool::PolygonLasso, "L again keeps the tool");
+        // ⇧L cycles; leaving and coming back keeps the new pick.
+        press(&mut app, Key::L, Modifiers::SHIFT);
         assert_eq!(app.ui.tool, Tool::MagneticLasso);
         press(&mut app, Key::M, Modifiers::NONE);
         assert_eq!(app.ui.tool, Tool::RectMarquee);
@@ -739,10 +742,12 @@ mod tests {
         assert_eq!(app.ui.tool, Tool::Type);
         press(&mut app, Modifiers::SHIFT);
         assert_ne!(app.ui.tool, Tool::Type);
-        // A stored "off" restores plain-key cycling.
+        // Custom: a stored "off" no longer brings back plain-key cycling; ⇧T still cycles.
         app.session.edit_prefs(|p| p.tools.use_shift_key_for_tool_switch = false);
         app.ui.tool = Tool::Type;
         press(&mut app, Modifiers::NONE);
+        assert_eq!(app.ui.tool, Tool::Type);
+        press(&mut app, Modifiers::SHIFT);
         assert_ne!(app.ui.tool, Tool::Type);
     }
 
