@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 DEFAULT_DEST = Path(r"C:\Apps\Photocraft")
@@ -43,13 +44,24 @@ def main() -> int:
 
     args.dest.mkdir(parents=True, exist_ok=True)
     target = args.dest / EXE
-    try:
-        shutil.copy2(built, target)
-    except PermissionError:
-        # Windows locks a running .exe, so a failed copy almost always means it's open.
-        print(f"Could not replace {target}. Close PhotoCraft if it's running from there, then run this again.")
-        return 1
-    print(f"Installed to {args.dest}")
+    interactive = sys.stdin is not None and sys.stdin.isatty()
+    while True:
+        try:
+            shutil.copy2(built, target)
+            break
+        except PermissionError:
+            # Windows locks a running .exe, so a failed copy almost always means it's open.
+            print()
+            print("=" * 72)
+            print(f"  NOT INSTALLED: {target} is in use.")
+            print("  Close PhotoCraft (every window), then press Enter to try again.")
+            print("=" * 72)
+            if not interactive:
+                return 1
+            if input("Press Enter to retry, or type q to quit: ").strip().lower() == "q":
+                print(f"Not installed; {target} is still the old version.")
+                return 1
+    print(f"Installed to {args.dest} (built {time.ctime(built.stat().st_mtime)}).")
     return 0
 
 
