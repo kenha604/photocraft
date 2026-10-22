@@ -23,7 +23,7 @@ impl ImageGenerator for Solid {
     fn describe(&self) -> String {
         "Test model".into()
     }
-    fn generate(&self, req: &EditRequest) -> std::result::Result<ImageData, GenError> {
+    fn generate(&self, req: &EditRequest, _: &dyn Fn() -> bool) -> std::result::Result<ImageData, GenError> {
         self.seen.lock().unwrap().push(req.clone());
         if let Some(a) = &self.answer {
             return Ok(ImageData { mime: "image/png".into(), bytes: a.clone() });
@@ -40,7 +40,7 @@ impl ImageGenerator for Failing {
     fn describe(&self) -> String {
         "Failing".into()
     }
-    fn generate(&self, _: &EditRequest) -> std::result::Result<ImageData, GenError> {
+    fn generate(&self, _: &EditRequest, _: &dyn Fn() -> bool) -> std::result::Result<ImageData, GenError> {
         Err(GenError::Quota("try later".into()))
     }
 }
@@ -252,4 +252,54 @@ fn edit_windows_and_frames() {
     let f = Frame::new(5, 5, "junk");
     assert_eq!((f.width, f.height), (5, 5));
     assert_eq!(bin_scalar(&[1.0, 0.0, 1.0, 0.0], 2, 2, 1, 1), vec![0.5]);
+}
+
+#[test]
+fn diffusion_backends_get_the_prompt_a_pixel_mask_and_the_strength() {
+    let mut s = red_doc(80, 60, 8);
+    s.execute("select.rect", json!({"x": 20, "y": 10, "width": 30, "height": 20})).unwrap();
+    let gen_ = Solid::new([0, 0, 255]);
+    s.set_image_generator(Some(gen_.clone()));
+    s.execute(COMMAND, json!({"prompt": "  rusty hull ", "strength": 0.7})).unwrap();
+    // No selection: an art pass sends an all-white mask and the gentler default strength.
+    s.execute("select.deselect", json!({})).unwrap();
+    s.execute(COMMAND, json!({"prompt": "warm light"})).unwrap();
+    let seen = gen_.seen.lock().unwrap();
+    let (fill, art) = (&seen[0], &seen[1]);
+    assert_eq!(fill.prompt, "rusty hull");
+    assert_eq!(fill.strength, 0.7);
+    assert_eq!(fill.source.as_ref(), Some(&fill.images[0]));
+    assert_eq!(fill.mask.as_ref(), Some(&fill.images[1]));
+    assert_eq!(art.strength, 0.45);
+    let mask = decode(art.mask.as_ref().unwrap());
+    let px = mask.to_rgba8();
+    let (mw, mh) = (mask.width() as usize, mask.height() as usize);
+    assert_eq!(px[((mh / 2) * mw + mw / 2) * 4], 255, "the whole picture may change");
+    drop(seen);
+    for bad in [json!(-0.1), json!(1.5), json!("strong")] {
+        assert!(s.execute(COMMAND, json!({"prompt": "x", "strength": bad})).is_err(), "{bad}");
+    }
+}
+
+/// Against a real ComfyUI with an SDXL inpainting checkpoint:
+/// `PHOTOCRAFT_COMFYUI_LIVE=1 cargo test -p photocraft-engine --lib live_comfyui -- --ignored --nocapture`
+#[test]
+#[ignore = "needs a running ComfyUI"]
+fn live_comfyui_fills_a_selection() {
+    if std::env::var_os("PHOTOCRAFT_COMFYUI_LIVE").is_none() {
+        return;
+    }
+    let url = std::env::var("PHOTOCRAFT_COMFYUI_URL").unwrap_or_else(|_| photocraft_genai::comfy::DEFAULT_URL.into());
+    let comfy = photocraft_genai::comfy::ComfyUi::new(&url, photocraft_genai::comfy::Workflow::SdxlInpaint { checkpoint: String::new() }).unwrap();
+    let mut s = red_doc(512, 384, 8);
+    let top = s.active().unwrap().active_layer.unwrap();
+    s.execute("select.rect", json!({"x": 160, "y": 112, "width": 192, "height": 160})).unwrap();
+    s.set_image_generator(Some(Arc::new(comfy)));
+    let t = std::time::Instant::now();
+    let r = s.execute(COMMAND, json!({"prompt": "a bright yellow sunflower, detailed petals"})).unwrap();
+    println!("ComfyUI fill took {:.1}s: {r}", t.elapsed().as_secs_f32());
+    let inside = pixel(&s, top, 256, 192);
+    println!("centre pixel {inside:?}");
+    assert!(inside[3] > 0.99, "the selection was painted");
+    assert_eq!(pixel(&s, top, 10, 10)[3], 0.0, "outside untouched");
 }

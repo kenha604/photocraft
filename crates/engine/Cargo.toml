@@ -46,6 +46,8 @@ roxmltree = "0.20"
 tempfile = "3"
 
 [dev-dependencies]
+# The opt-in live ComfyUI test (`generative_cmds_tests.rs`) needs the HTTP transport.
+photocraft-genai = { workspace = true, features = ["http"] }
 photocraft-affinity = { workspace = true, features = ["synth"] }
 # Synthetic camera raw files for the open tests.
 photocraft-raw = { workspace = true, features = ["testgen"] }

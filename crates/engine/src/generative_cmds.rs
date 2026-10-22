@@ -48,16 +48,26 @@ const BACKGROUND: [f32; 3] = [1.0, 1.0, 1.0];
 pub trait ImageGenerator: Send + Sync {
     /// Shown in the dialog and in errors, e.g. "Google Gemini (gemini-nano-banana-2.1)".
     fn describe(&self) -> String;
-    /// Run one edit; the answer is an encoded image (PNG, JPEG, ...).
-    fn generate(&self, req: &EditRequest) -> std::result::Result<ImageData, GenError>;
+    /// Run one edit; the answer is an encoded image (PNG, JPEG, ...). `cancel` turns true when
+    /// the user cancels: a model that can stop early checks it.
+    fn generate(&self, req: &EditRequest, cancel: &dyn Fn() -> bool) -> std::result::Result<ImageData, GenError>;
 }
 
 impl ImageGenerator for photocraft_genai::Gemini {
     fn describe(&self) -> String {
         format!("Google Gemini ({})", self.model())
     }
-    fn generate(&self, req: &EditRequest) -> std::result::Result<ImageData, GenError> {
+    fn generate(&self, req: &EditRequest, _cancel: &dyn Fn() -> bool) -> std::result::Result<ImageData, GenError> {
         photocraft_genai::Gemini::generate(self, req)
+    }
+}
+
+impl ImageGenerator for photocraft_genai::comfy::ComfyUi {
+    fn describe(&self) -> String {
+        photocraft_genai::comfy::ComfyUi::describe(self)
+    }
+    fn generate(&self, req: &EditRequest, cancel: &dyn Fn() -> bool) -> std::result::Result<ImageData, GenError> {
+        photocraft_genai::comfy::ComfyUi::generate(self, req, cancel)
     }
 }
 
@@ -104,7 +114,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Generative Fill…",
         menu: &["Edit"],
         shortcut: None,
-        params: r##"{"prompt":string (what the selected area should become, or with no selection what the art pass should do; ≤2000 characters),"output":"current|new"? (into the active pixel layer, or a new layer; default current with a selection, new without)} → {layer, window:[x,y,w,h], model} (sends the visible canvas to the installed image model — Google Gemini on the desktop with an API key — and blends its answer into the selected pixels only; one undo step; runs as a background job)"##,
+        params: r##"{"prompt":string (what the selected area should become, or with no selection what the art pass should do; ≤2000 characters),"output":"current|new"? (into the active pixel layer, or a new layer; default current with a selection, new without),"strength":0..1? (how far a local diffusion model may move from the canvas: 1 repaints fully; default 1 with a selection, 0.45 for an art pass; Gemini ignores it)} → {layer, window:[x,y,w,h], model} (sends the visible canvas to the installed image model — Google Gemini or a local ComfyUI — and blends its answer into the selected pixels only; one undo step; runs as a background job)"##,
         enabled: can_fill,
         journal: true,
         run: generative_fill,
@@ -172,8 +182,18 @@ fn generative_fill(s: &mut Session, p: &Value) -> Result<Value> {
         }
         None => None,
     };
+    let strength = match p.get("strength") {
+        None | Some(Value::Null) => {
+            if selection.is_some() {
+                1.0
+            } else {
+                0.45
+            }
+        }
+        Some(v) => v.as_f64().filter(|v| v.is_finite() && (0.0..=1.0).contains(v)).ok_or_else(|| bad("`strength` must be a number from 0 to 1"))? as f32,
+    };
     let generator = s.image_generator.clone().ok_or_else(|| {
-        EngineError::Other("Generative Fill needs an image model: set a Gemini API key in Preferences › Integrations (Generative Fill)".into())
+        EngineError::Other("Generative Fill needs an image model: set a Gemini API key in the Generative Fill dialog, or choose ComfyUI in Preferences › Integrations".into())
     })?;
     let fmt = target.and_then(|t| doc.layer(t)).and_then(|l| l.surface()).map(Surface::format).unwrap_or_else(|| doc.pixel_format());
     let composite = crate::color_cmds::composite_profile(&doc);
@@ -188,7 +208,7 @@ fn generative_fill(s: &mut Session, p: &Value) -> Result<Value> {
                 .map_err(|e| EngineError::Other(format!("colour management: {e}")))?;
             let from_srgb = Transform::new(Builtin::Srgb.profile(), &composite, Intent::Perceptual, true)
                 .map_err(|e| EngineError::Other(format!("colour management: {e}")))?;
-            let job = Job { doc: &doc, ctx, to_srgb: &to_srgb, from_srgb: &from_srgb };
+            let job = Job { doc: &doc, ctx, to_srgb: &to_srgb, from_srgb: &from_srgb, strength };
             let generated = match (&selection, fill_area) {
                 (Some(sel), Some(area)) => job.fill(sel, area, &prompt, generator.as_ref())?,
                 _ => job.art_pass(&prompt, generator.as_ref())?,
@@ -205,6 +225,7 @@ struct Job<'a> {
     ctx: &'a JobCtx,
     to_srgb: &'a Transform,
     from_srgb: &'a Transform,
+    strength: f32,
 }
 
 impl Job<'_> {
@@ -230,7 +251,8 @@ impl Job<'_> {
         let mask_small = bin_scalar(&cover_window, window.width() as usize, window.height() as usize, sw as usize, sh as usize);
         drop(cover_window);
         self.cancelled()?;
-        let mut images = vec![frame.png_rgb(&rgb, BACKGROUND)?, frame.png_mask(&mask_small)?];
+        let (source, mask) = (frame.png_rgb(&rgb, BACKGROUND)?, frame.png_mask(&mask_small)?);
+        let mut images = vec![source.clone(), mask.clone()];
         if crop {
             let ctx_img = self.context_image()?;
             images.push(ctx_img);
@@ -240,6 +262,10 @@ impl Job<'_> {
             images,
             aspect_ratio: Some(ratio),
             image_size: Some(photocraft_genai::image_size_for(sw.max(sh))),
+            prompt: prompt.to_string(),
+            source: Some(source),
+            mask: Some(mask),
+            strength: self.strength,
         };
         let result = self.call(generator, &req)?;
         // Only the selection's bounds are written; resample the answer over them.
@@ -260,11 +286,19 @@ impl Job<'_> {
         let rgb = self.flatten_to_srgb(&buf.px);
         let ratio = photocraft_genai::nearest_aspect_ratio(sw, sh);
         let frame = Frame::new(sw, sh, ratio);
+        let source = frame.png_rgb(&rgb, BACKGROUND)?;
+        // The whole picture may change: a diffusion model reads an all-white mask (the padding
+        // to the aspect ratio stays black).
+        let mask = frame.png_mask(&vec![1.0; rgb.len()])?;
         let req = EditRequest {
             instruction: photocraft_genai::art_pass_instruction(prompt),
-            images: vec![frame.png_rgb(&rgb, BACKGROUND)?],
+            images: vec![source.clone()],
             aspect_ratio: Some(ratio),
             image_size: Some(photocraft_genai::image_size_for(sw.max(sh))),
+            prompt: prompt.to_string(),
+            source: Some(source),
+            mask: Some(mask),
+            strength: self.strength,
         };
         let result = self.call(generator, &req)?;
         let rgb = self.resample_back(&result, &frame, bounds, bounds)?;
@@ -275,7 +309,8 @@ impl Job<'_> {
     fn call(&self, generator: &dyn ImageGenerator, req: &EditRequest) -> Result<photocraft_codecs::Image> {
         self.cancelled()?;
         self.ctx.progress(0.15, &format!("Waiting for {}", generator.describe()));
-        let answer = generator.generate(req).map_err(|e| EngineError::Other(e.to_string()))?;
+        let cancel = || self.ctx.cancelled();
+        let answer = generator.generate(req, &cancel).map_err(|e| if self.ctx.cancelled() { EngineError::Cancelled } else { EngineError::Other(e.to_string()) })?;
         // The model can't be interrupted mid-request: a Cancel during it is honoured here.
         self.cancelled()?;
         self.ctx.progress(0.85, "Blending the result");

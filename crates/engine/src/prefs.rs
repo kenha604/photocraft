@@ -881,14 +881,36 @@ pub struct Integrations {
     pub allow_agent_control: bool,
     /// Default control port (0 = only when `--control` is given).
     pub control_port: u32,
-    /// Edit › Generative Fill: the Google Gemini image model it calls (custom). The API key is
-    /// never a preference: it lives in the OS credential store, out of reach of `prefs.get`.
+    /// Edit › Generative Fill (custom): which model it calls, `gemini` (Google, cloud) or
+    /// `comfyui` (a local ComfyUI server).
+    pub generative_provider: String,
+    /// The Google Gemini image model. The API key is never a preference: it lives in the OS
+    /// credential store, out of reach of `prefs.get`.
     pub generative_model: String,
+    /// The ComfyUI server's address.
+    pub comfyui_url: String,
+    /// The checkpoint the built-in SDXL inpainting workflow loads; empty picks the first
+    /// installed checkpoint whose name says "inpaint".
+    pub comfyui_checkpoint: String,
+    /// A workflow exported from ComfyUI in API format, with nodes titled `PC Prompt`, `PC Image`,
+    /// `PC Mask`, `PC Sampler` and `PC Output`; empty runs the built-in SDXL inpainting workflow.
+    pub comfyui_workflow: String,
 }
+
+/// Generative Fill's providers (`integrations.generativeProvider`).
+pub const GENERATIVE_PROVIDERS: &[&str] = &["gemini", "comfyui"];
 
 impl Default for Integrations {
     fn default() -> Self {
-        Self { allow_agent_control: true, control_port: 0, generative_model: photocraft_genai::DEFAULT_MODEL.to_string() }
+        Self {
+            allow_agent_control: true,
+            control_port: 0,
+            generative_provider: "gemini".into(),
+            generative_model: photocraft_genai::DEFAULT_MODEL.to_string(),
+            comfyui_url: photocraft_genai::comfy::DEFAULT_URL.to_string(),
+            comfyui_checkpoint: String::new(),
+            comfyui_workflow: String::new(),
+        }
     }
 }
 
@@ -1098,6 +1120,7 @@ pub fn choices(path: &str) -> Option<&'static [&'static str]> {
         "rawDefaults.colorSpace" => RawColorSpace::NAMES,
         "rawDefaults.bitDepth" => RawDepth::NAMES,
         "integrations.generativeModel" => photocraft_genai::MODEL_IDS,
+        "integrations.generativeProvider" => GENERATIVE_PROVIDERS,
         "rawDefaults.sharpenFor" => RawSharpen::NAMES,
         "performance.gpuBackend" => GpuBackend::NAMES,
         "performance.linuxDisplayServer" => LinuxDisplayServer::NAMES,

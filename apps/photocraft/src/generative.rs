@@ -1,5 +1,5 @@
-//! Edit › Generative Fill on the desktop (custom): the Gemini API key in the OS credential store
-//! and the model built from it.
+//! Edit › Generative Fill on the desktop (custom): the Gemini API key in the OS credential store,
+//! and the model the preferences ask for (Gemini, or a local ComfyUI server).
 //!
 //! The key is kept in Windows Credential Manager or the macOS Keychain (the `keyring` crate). On
 //! Linux, where a Secret Service may not be running, it is a file only the user can read in the
@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use photocraft_engine::generative_cmds::ImageGenerator;
-use photocraft_ui_egui::generative_ui::{GenerativeService, KeyInfo};
+use photocraft_ui_egui::generative_ui::{GenConfig, GenerativeService, KeyInfo};
 
 /// The credential's service and account names.
 #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -26,12 +26,37 @@ pub fn service() -> GenerativeService {
             Some(k) => store::save(k.trim()),
             None => store::delete(),
         }),
-        generator: Box::new(|model| {
+        generator: Box::new(|config| {
+            if config.is_comfyui() {
+                return comfyui(config);
+            }
             let (key, _, _) = current_key().ok_or("no Gemini API key is set")?;
-            let gemini = photocraft_genai::Gemini::new(key, model).map_err(|e| e.to_string())?;
+            let gemini = photocraft_genai::Gemini::new(key, &config.gemini_model).map_err(|e| e.to_string())?;
             Ok(Arc::new(gemini) as Arc<dyn ImageGenerator>)
         }),
     }
+}
+
+/// A local ComfyUI server running the built-in SDXL inpainting workflow, or the workflow file
+/// set in Preferences › Integrations.
+fn comfyui(config: &GenConfig) -> Result<Arc<dyn ImageGenerator>, String> {
+    use photocraft_genai::comfy::{ComfyUi, Workflow};
+    let path = config.comfyui_workflow.trim().trim_matches('"');
+    let workflow = if path.is_empty() {
+        Workflow::SdxlInpaint { checkpoint: config.comfyui_checkpoint.trim().to_string() }
+    } else {
+        // Workflows are small JSON files; refuse anything that isn't.
+        let meta = std::fs::metadata(path).map_err(|e| format!("ComfyUI workflow file {path}: {e}"))?;
+        if meta.len() > 16 * 1024 * 1024 {
+            return Err(format!("ComfyUI workflow file {path} is too large to be a workflow"));
+        }
+        let text = std::fs::read_to_string(path).map_err(|e| format!("ComfyUI workflow file {path}: {e}"))?;
+        let graph: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("ComfyUI workflow file {path}: not JSON ({e})"))?;
+        let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("custom workflow").to_string();
+        Workflow::Custom { name, graph }
+    };
+    let comfy = ComfyUi::new(&config.comfyui_url, workflow).map_err(|e| e.to_string())?;
+    Ok(Arc::new(comfy) as Arc<dyn ImageGenerator>)
 }
 
 /// The key in use: (key, where it came from, whether Remove can delete it).

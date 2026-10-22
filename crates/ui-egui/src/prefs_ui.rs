@@ -1094,6 +1094,10 @@ fn humanize(key: &str) -> String {
         "exrAcesCg" => return "Open color-less EXR as ACEScg".into(),
         "darkTheme" => return "Dark Theme".into(),
         "lightTheme" => return "Light Theme".into(),
+        // Generative Fill (custom).
+        "comfyuiUrl" => return "ComfyUI address".into(),
+        "comfyuiCheckpoint" => return "ComfyUI checkpoint".into(),
+        "comfyuiWorkflow" => return "ComfyUI workflow file".into(),
         _ => {}
     }
     // These controls appear only for WebP, so reuse the existing translated labels.
@@ -1160,6 +1164,8 @@ fn choice_label(v: &str) -> String {
         "gemini-3.1-flash-image" => "Nano Banana 2".into(),
         "gemini-3.1-flash-lite-image" => "Nano Banana 2 Lite".into(),
         "gemini-2.5-flash-image" => "Nano Banana".into(),
+        "gemini" => "Google Gemini".into(),
+        "comfyui" => "ComfyUI".into(),
         v => humanize(v),
     }
 }
@@ -1379,6 +1385,16 @@ fn export_field_visible(obj: &Map<String, Value>, key: &str) -> bool {
     }
 }
 
+/// Generative Fill shows the Gemini model or the ComfyUI settings, for the provider chosen.
+fn integrations_field_visible(obj: &Map<String, Value>, key: &str) -> bool {
+    let comfy = obj.get("generativeProvider").and_then(Value::as_str) == Some("comfyui");
+    match key {
+        "generativeModel" => !comfy,
+        "comfyuiUrl" | "comfyuiCheckpoint" | "comfyuiWorkflow" => comfy,
+        _ => true,
+    }
+}
+
 /// The pause that bundles arrow-key nudges means nothing with Bundle Arrow-Key Nudges off (#2259).
 fn tools_field_visible(obj: &Map<String, Value>, key: &str) -> bool {
     key != "nudgeBundlePauseMs" || obj.get("bundleNudges").and_then(Value::as_bool) != Some(false)
@@ -1571,7 +1587,8 @@ fn field_visible(section: &str, obj: &Map<String, Value>, k: &str, query: &str) 
         // The browser presents frames itself: Low-Latency Drawing does nothing there.
         || (cfg!(target_arch = "wasm32") && path == "performance.lowLatencyDrawing")
         || (section == "export" && !export_field_visible(obj, k))
-        || (section == "tools" && !tools_field_visible(obj, k));
+        || (section == "tools" && !tools_field_visible(obj, k))
+        || (section == "integrations" && !integrations_field_visible(obj, k));
     (query.is_empty() || preference_matches(section, k, query))
         && !drawn_elsewhere
         && !prefs::is_hidden(&path)

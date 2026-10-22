@@ -49,8 +49,10 @@ impl ImageData {
     }
 }
 
-/// One image-editing request.
-#[derive(Clone, Debug, PartialEq)]
+/// One image-editing request. It carries the same edit two ways: Gemini reads `instruction` and
+/// `images` (the mask described in words); a diffusion backend (ComfyUI) reads the user's own
+/// `prompt`, the `source` image, its pixel `mask` and the `strength`.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct EditRequest {
     /// The full instruction text (see [`fill_instruction`] / [`art_pass_instruction`]).
     pub instruction: String,
@@ -61,6 +63,14 @@ pub struct EditRequest {
     pub aspect_ratio: Option<&'static str>,
     /// `512`, `1K`, `2K` or `4K` ([`image_size_for`]).
     pub image_size: Option<&'static str>,
+    /// The user's prompt as typed.
+    pub prompt: String,
+    /// The image to edit (the first of `images`).
+    pub source: Option<ImageData>,
+    /// Its mask, the same size, white where to repaint; `None` repaints everything (art pass).
+    pub mask: Option<ImageData>,
+    /// How far a diffusion model may move from the source, 0..1 (1 = repaint fully).
+    pub strength: f32,
 }
 
 /// Why a request failed, worded for the user.
@@ -184,6 +194,7 @@ pub fn valid_model(model: &str) -> bool {
 
 /// The JSON body for `models/{model}:generateContent`.
 pub fn request_body(req: &EditRequest) -> Value {
+    // (Gemini has no strength or pixel mask: `prompt`, `source`, `mask` are for diffusion backends.)
     let b64 = base64::engine::general_purpose::STANDARD;
     let mut parts = vec![json!({"text": req.instruction})];
     parts.extend(req.images.iter().map(|i| json!({"inlineData": {"mimeType": i.mime, "data": b64.encode(&i.bytes)}})));
@@ -339,6 +350,8 @@ impl Gemini {
     }
 }
 
+pub mod comfy;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,6 +367,7 @@ mod tests {
             images: vec![ImageData::png(vec![1, 2, 3]), ImageData::png(vec![4])],
             aspect_ratio: Some("16:9"),
             image_size: Some("2K"),
+            ..Default::default()
         };
         let v = request_body(&req);
         let parts = v.pointer("/contents/0/parts").and_then(Value::as_array).unwrap();
@@ -365,7 +379,7 @@ mod tests {
         assert_eq!(v["generationConfig"]["responseModalities"], json!(["IMAGE"]));
         assert_eq!(v["generationConfig"]["imageConfig"], json!({"aspectRatio": "16:9", "imageSize": "2K"}));
         // Without size hints there is no imageConfig at all.
-        let bare = request_body(&EditRequest { aspect_ratio: None, image_size: None, ..req });
+        let bare = request_body(&EditRequest { aspect_ratio: None, image_size: None, ..req.clone() });
         assert!(bare["generationConfig"].get("imageConfig").is_none());
     }
 
