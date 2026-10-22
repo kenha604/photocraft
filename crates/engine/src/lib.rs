@@ -113,6 +113,8 @@ pub mod smartselect_cmds;
 pub mod snap;
 pub mod solid_fill_cmds;
 pub mod stamp_cmds;
+// Custom (KenShoppe): Edit › Generative Fill through an installed image model.
+pub mod generative_cmds;
 pub mod swatch_cmds;
 pub mod symmetry_cmds;
 mod timeline_cmds;
@@ -512,6 +514,9 @@ pub struct Session {
     /// document, source read-only)`. The shell takes them with [`Session::take_held_open`].
     held_opens: Vec<(u64, Document, bool)>,
     next_held_open: u64,
+    /// The model Edit › Generative Fill calls (the desktop app installs one; see
+    /// [`generative_cmds`]).
+    image_generator: Option<std::sync::Arc<dyn generative_cmds::ImageGenerator>>,
 }
 
 /// Move item `i` of `v` to position `to`, clamped to the end. Returns where it went; `None` when

@@ -35,6 +35,8 @@ blake3 = { version = "1.8", default-features = false, features = ["pure"] }
 photocraft-codecs = { workspace = true }
 flate2 = { workspace = true }
 craft-print = { workspace = true }
+# Edit › Generative Fill's request/response types (the transport is the app's `http` feature).
+photocraft-genai = { workspace = true }
 
 # Photoshop `.kys` shortcut sets (`edit.keyboardShortcuts` `importKys`); already in the tree
 # through photocraft-ui-egui and usvg.

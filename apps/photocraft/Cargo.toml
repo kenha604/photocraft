@@ -29,6 +29,8 @@ photocraft-automation = { workspace = true }
 photocraft-ui-egui = { workspace = true }
 # Pen tablet pressure/tilt on macOS and X11 (the workspace's one isolated unsafe helper crate).
 photocraft-tablet = { workspace = true }
+# Edit › Generative Fill (custom): the Gemini client with its HTTPS transport.
+photocraft-genai = { workspace = true, features = ["http"] }
 eframe = { workspace = true, features = ["wgpu", "accesskit", "wayland", "x11", "persistence"] }
 egui = { workspace = true }
 serde_json = { workspace = true }
@@ -40,6 +42,10 @@ arboard = { version = "3.6", features = ["wayland-data-control"] }
 open = "5"
 # Reads the saved window layout (eframe persistence) to drop values that would abort startup.
 ron = "0.12"
+
+# Generative Fill's Gemini API key in Windows Credential Manager / the macOS Keychain (custom).
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["windows-native", "apple-native"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Safe CoreGraphics bindings, compatible with the existing macOS 11 deployment target.

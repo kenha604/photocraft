@@ -1154,6 +1154,12 @@ fn choice_label(v: &str) -> String {
         "metal" => "Metal".into(),
         "gl" => "OpenGL".into(),
         "cpu" => "CPU (no GPU acceleration)".into(),
+        // Generative Fill's Gemini models by their product names (custom).
+        "gemini-nano-banana-2.1" => "Nano Banana 2.1".into(),
+        "gemini-3-pro-image" => "Nano Banana Pro".into(),
+        "gemini-3.1-flash-image" => "Nano Banana 2".into(),
+        "gemini-3.1-flash-lite-image" => "Nano Banana 2 Lite".into(),
+        "gemini-2.5-flash-image" => "Nano Banana".into(),
         v => humanize(v),
     }
 }
@@ -3476,10 +3482,11 @@ mod tests {
         let values = prefs::Preferences::default().to_json();
         assert!(has_visible_fields(&values, "general"));
         assert!(has_visible_fields(&values, "fileHandling"));
-        // Every setting of these sections is still unimplemented.
-        for section in ["integrations", "scratchDisks"] {
-            assert!(!has_visible_fields(&values, section), "{section}");
-        }
+        // Every setting of this section is still unimplemented.
+        assert!(!has_visible_fields(&values, "scratchDisks"));
+        // Integrations shows only the Generative Fill model (custom); the control settings stay hidden.
+        assert!(has_visible_fields(&values, "integrations"));
+        assert!(!prefs::is_hidden("integrations.generativeModel"));
         // "Fill new type layers with placeholder text" and "Use Escape to Commit" are live; other Type rows stay hidden.
         assert!(has_visible_fields(&values, "type"));
         assert!(!prefs::is_hidden("type.fillNewTypeLayersWithPlaceholder"));

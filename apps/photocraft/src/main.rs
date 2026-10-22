@@ -65,6 +65,8 @@ mod portal_save;
 mod presentation;
 mod screen_color;
 mod services;
+// Custom (KenShoppe): Generative Fill's Gemini key and model.
+mod generative;
 // macOS gets one instance from LaunchServices (open-documents Apple events).
 #[cfg(any(not(target_os = "macos"), test))]
 mod single_instance;

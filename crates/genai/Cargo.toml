@@ -1,0 +1,21 @@
+[package]
+name = "photocraft-genai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Generative image editing clients for PhotoCraft (Google Gemini image models)"
+
+[lints]
+workspace = true
+
+[features]
+# The HTTPS transport (`Gemini::generate`). The desktop app turns it on; the engine, the CLI's
+# headless paths and the web build only use the request/response data types.
+http = ["dep:ureq"]
+
+[dependencies]
+serde_json = { workspace = true }
+base64 = "0.22"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }

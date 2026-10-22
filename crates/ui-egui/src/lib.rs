@@ -80,6 +80,8 @@ pub mod distort_ui;
 pub mod doc_props_ui;
 pub mod dock;
 pub mod duplicate_layer_ui;
+// Custom (KenShoppe): Edit › Generative Fill… dialog and the Gemini key.
+pub mod generative_ui;
 pub mod edit_history;
 pub mod egui_fonts;
 pub mod enable_rules;
@@ -496,6 +498,8 @@ pub struct Services {
     /// OS clipboard images: copies go out, screenshots and images from other apps come in.
     pub clipboard_set_image: Option<ClipboardSetFn>,
     pub clipboard_get_image: Option<ClipboardGetFn>,
+    /// Edit › Generative Fill: the API key store and model factory (desktop; `None` on the web).
+    pub generative: Option<generative_ui::GenerativeService>,
     /// Preferences persistence: the platform config directory on native, browser storage on
     /// the web (see `prefs_ui`).
     pub load_prefs: Option<LoadTextFn>,
@@ -657,6 +661,8 @@ pub struct PhotocraftApp {
     pub(crate) notices_hovered: bool,
     /// Apply theme on first frame.
     styled: bool,
+    /// Generative Fill's installed model and recent prompts (see `generative_ui`).
+    pub(crate) generative: generative_ui::GenerativeState,
     /// The start-up splash while it shows (the desktop app sets it; `None` starts into the UI).
     pub splash: Option<splash::Splash>,
     /// Whether the window uses an integrated (transparent) macOS title bar.
@@ -893,6 +899,7 @@ impl PhotocraftApp {
             frame: 0,
             notices_hovered: false,
             styled: false,
+            generative: Default::default(),
             splash: None,
             integrated_titlebar: false,
             custom_titlebar: false,
@@ -2073,6 +2080,7 @@ impl eframe::App for PhotocraftApp {
         notices::show(self, &ctx);
         gpu_status::show_fallback(self, &ctx);
         kys_import::show_offer(self, &ctx);
+        generative_ui::sync(self);
         if self.splash.as_mut().is_some_and(|s| !s.show(&ctx)) {
             self.splash = None;
         }
